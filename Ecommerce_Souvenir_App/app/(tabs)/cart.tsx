@@ -14,7 +14,7 @@ import { router } from "expo-router";
 
 
 export default function CartScreen() {
-  const { cartItems, removeFromCart, updateQuantity, cartCount } = useCart();
+  const { cartItems, removeFromCart, updateQuantity } = useCart();
 
   const totalPrice = cartItems.reduce((sum, item) => {
     const price = parseInt(item.price.replace("₱", ""));
@@ -50,7 +50,6 @@ export default function CartScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>My Cart</Text>
-        <Text style={styles.itemCount}>{cartCount} items</Text>
       </View>
 
       {/* Cart Items */}
@@ -62,7 +61,6 @@ export default function CartScreen() {
               <Text style={styles.itemName} numberOfLines={1}>
                 {item.name}
               </Text>
-              <Text style={styles.itemPrice}>{item.price}</Text>
 
               {/* Quantity Controls */}
               <View style={styles.quantityRow}>
@@ -115,7 +113,6 @@ export default function CartScreen() {
           onPress={() => router.push("/checkout")}
         >
           <Text style={styles.checkoutButtonText}>Checkout</Text>
-          <Ionicons name="arrow-forward" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
 
@@ -160,10 +157,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#5C4033",
   },
-  itemCount: {
-    fontSize: 14,
-    color: "#999",
-  },
   cartList: {
     flex: 1,
     paddingHorizontal: 20,
@@ -190,18 +183,13 @@ const styles = StyleSheet.create({
   itemDetails: {
     flex: 1,
     paddingHorizontal: 12,
+    justifyContent: "center",
+    gap: 10,
   },
   itemName: {
     fontSize: 15,
     fontWeight: "600",
     color: "#333",
-    marginBottom: 4,
-  },
-  itemPrice: {
-    fontSize: 14,
-    color: "#5C4033",
-    fontWeight: "600",
-    marginBottom: 8,
   },
   quantityRow: {
     flexDirection: "row",

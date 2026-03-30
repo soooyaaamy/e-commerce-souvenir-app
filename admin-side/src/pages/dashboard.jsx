@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '../config/firebase';
-// import { auth } from '../config/firebase';
 import {
   collection,
   onSnapshot,
@@ -49,104 +48,101 @@ function StatusPill({ status }) {
   );
 }
 
-// ── Order Detail Modal ───────────────────────────────────────────
+// ── Parse price safely ───────────────────────────────────────────
+const parsePrice = (val) => {
+  if (val == null) return 0;
+  if (typeof val === 'number') return val;
+  return parseFloat(String(val).replace(/[₱,]/g, '')) || 0;
+};
+
+// ── Order Detail Modal — matches Orders.jsx exactly ──────────────
 function OrderModal({ order, users = [], onClose }) {
   if (!order) return null;
+
   const date = order.createdAt?.toDate
-  ? order.createdAt.toDate().toLocaleDateString('en-PH', { 
-      month: 'long', 
-      day: 'numeric', 
-      year: 'numeric'
-    })
-  : '—';
+    ? order.createdAt.toDate().toLocaleDateString('en-PH', {
+        month: 'long', day: 'numeric', year: 'numeric',
+      })
+    : '—';
 
-  const parsePrice = (val) => {
-    if (val == null) return 0;
-    if (typeof val === 'number') return val;
-    return parseFloat(String(val).replace(/[₱,]/g, '')) || 0;
-  };
-  const parseQty = (val) => parseInt(val, 10) || 1;
-
-  const subtotal = order.items?.reduce((s, item) => {
-    return s + parsePrice(item.price) * parseQty(item.quantity);
-  }, 0) || 0;
+  const subtotal = order.items?.reduce((s, item) =>
+    s + parsePrice(item.price) * (parseInt(item.quantity, 10) || 1), 0) || 0;
   const grandTotal = parsePrice(order.grandTotal);
   const shipping = Math.max(grandTotal - subtotal, 0);
+
+  // Resolve display name from users list
+  const u = users.find(
+    (u) => u.id === order.userId || u.uid === order.userId || u.email === order.userEmail
+  );
+  const displayName =
+    u?.displayName || u?.name || u?.fullName || u?.username ||
+    order.userEmail?.split('@')[0] || '—';
 
   return (
     <div style={styles.modalOverlay} onClick={onClose}>
       <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
-        {/* Modal Header */}
+
+        {/* Header */}
         <div style={styles.modalHeader}>
           <div>
             <h2 style={styles.modalTitle}>Order Details</h2>
             <p style={styles.modalOrderId}>
-              Order <span style={{ fontFamily: 'monospace', color: '#5C4033' }}>#{order.id}</span>
+              Order{' '}
+              <span style={{ fontFamily: 'monospace', color: '#5C4033' }}>
+                #{order.id}
+              </span>
             </p>
           </div>
           <button onClick={onClose} style={styles.closeBtn}>✕</button>
         </div>
 
-        {/* Order Info Row */}
+        {/* Info grid — 2×2 balanced layout */}
         <div style={styles.modalInfoRow}>
           <div style={styles.modalInfoItem}>
             <span style={styles.modalInfoLabel}>Customer</span>
-            {(() => {
-              const u = users.find(
-                (u) =>
-                  u.id === order.userId ||
-                  u.uid === order.userId ||
-                  u.email === order.userEmail
-              );
-
-              const name =
-                u?.displayName ||
-                u?.name ||
-                u?.fullName ||
-                u?.username ||
-                order.userEmail?.split('@')[0] ||
-                '—';
-
-              return (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
-                  <div>
-                    <p style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>
-                      {name}
-                    </p>
-                    <p style={{ fontSize: 11, color: '#94A3B8', margin: 0 }}>
-                      {order.userEmail || ''}
-                    </p>
-                  </div>
-                </div>
-              );
-            })()}
+            <p style={{ fontSize: 13, fontWeight: 600, margin: '2px 0 0', color: '#1A1A2E' }}>
+              {displayName}
+            </p>
+            <p style={{ fontSize: 11, color: '#94A3B8', margin: 0 }}>
+              {order.userEmail || ''}
+            </p>
+          </div>
+          <div style={styles.modalInfoItem}>
+            <span style={styles.modalInfoLabel}>Payment</span>
+            <span style={styles.modalInfoValue}>
+              {order.paymentMethod === 'cod' ? '💵 Cash on Delivery' : '📱 GCash'}
+            </span>
           </div>
           <div style={styles.modalInfoItem}>
             <span style={styles.modalInfoLabel}>Date Placed</span>
             <span style={styles.modalInfoValue}>{date}</span>
           </div>
-
           <div style={styles.modalInfoItem}>
-          <span style={styles.modalInfoLabel}>Date Received</span>
-          <span style={{ ...styles.modalInfoValue, color: '#15803D', fontWeight: 700 }}>
-            {order.dateReceived?.toDate
-              ? order.dateReceived.toDate().toLocaleDateString('en-PH', {
-                  month: 'long',
-                  day: 'numeric',
-                  year: 'numeric',
-                })
-              : 'Not received yet'}
-          </span>
-        </div>
+            <span style={styles.modalInfoLabel}>Date Received</span>
+            <span style={{ ...styles.modalInfoValue, color: '#15803D', fontWeight: 700 }}>
+              {order.completedAt?.toDate
+                ? order.completedAt.toDate().toLocaleDateString('en-PH', {
+                    month: 'long', day: 'numeric', year: 'numeric',
+                  })
+                : 'Not received yet'}
+            </span>
+          </div>
         </div>
 
-        {/* Shipping Address */}
+        {/* Shipping address */}
         {order.address && (
           <div style={styles.modalSection}>
             <p style={styles.modalSectionTitle}>📍 Shipping Address</p>
             <p style={styles.modalAddressText}>
-              {[order.address.street, order.address.barangay, order.address.city, order.address.province, order.address.zip]
-                .filter(Boolean).join(', ')}
+              {[
+                order.address.street,
+                order.address.barangay,
+                order.address.city,
+                order.address.province,
+                order.address.zip,
+              ]
+                .filter(Boolean)
+                .join(', ')}
             </p>
           </div>
         )}
@@ -159,16 +155,27 @@ function OrderModal({ order, users = [], onClose }) {
               <div key={i} style={styles.modalItemRow}>
                 <div style={styles.modalItemThumb}>
                   {item.image
-                    ? <img src={item.image} alt={item.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} onError={(e) => { e.target.style.display = 'none'; }} />
+                    ? (
+                      <img
+                        src={item.image}
+                        alt={item.name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }}
+                        onError={(e) => { e.target.style.display = 'none'; }}
+                      />
+                    )
                     : <span style={{ fontSize: 18 }}>🛍️</span>}
                 </div>
                 <div style={{ flex: 1 }}>
                   <p style={styles.modalItemName}>{item.name}</p>
-                  {item.variant && <p style={styles.modalItemVariant}>Variant: {item.variant}</p>}
+                  {item.variant && (
+                    <p style={styles.modalItemVariant}>Variant: {item.variant}</p>
+                  )}
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <p style={styles.modalItemPrice}>₱{(parsePrice(item.price))}</p>
-                  <p style={styles.modalItemQty}>x{parseQty(item.quantity)}</p>
+                  <p style={styles.modalItemPrice}>
+                    ₱{(parsePrice(item.price) * (parseInt(item.quantity, 10) || 1)).toLocaleString()}
+                  </p>
+                  <p style={styles.modalItemQty}>x{item.quantity || 1}</p>
                 </div>
               </div>
             ))}
@@ -187,11 +194,21 @@ function OrderModal({ order, users = [], onClose }) {
               <span style={styles.modalTotalValue}>₱{shipping.toLocaleString()}</span>
             </div>
           )}
-          <div style={{ ...styles.modalTotalRow, borderTop: '2px solid #F1F5F9', paddingTop: 10, marginTop: 4 }}>
-            <span style={{ ...styles.modalTotalLabel, fontSize: 15, fontWeight: 700, color: '#1A1A2E' }}>Total</span>
-            <span style={{ fontSize: 18, fontWeight: 800, color: '#5C4033' }}>₱{grandTotal.toLocaleString()}</span>
+          <div style={{
+            ...styles.modalTotalRow,
+            borderTop: '2px solid #F1F5F9',
+            paddingTop: 10,
+            marginTop: 4,
+          }}>
+            <span style={{ ...styles.modalTotalLabel, fontSize: 15, fontWeight: 700, color: '#1A1A2E' }}>
+              Total
+            </span>
+            <span style={{ fontSize: 18, fontWeight: 800, color: '#5C4033' }}>
+              ₱{grandTotal.toLocaleString()}
+            </span>
           </div>
         </div>
+
       </div>
     </div>
   );
@@ -200,40 +217,82 @@ function OrderModal({ order, users = [], onClose }) {
 // ── Revenue Chart (Daily / Weekly toggle) ────────────────────────
 function RevenueChart({ orders }) {
   const [view, setView] = useState('weekly');
+  // Re-compute `now` on every render so the chart is always current
   const CHART_H = 130;
 
   const bars = React.useMemo(() => {
     const now = new Date();
+
     if (view === 'daily') {
+      // Last 7 days ending TODAY — labeled with the actual date (e.g. "Mar 30")
       return Array.from({ length: 7 }, (_, i) => {
         const d = new Date(now);
-        d.setDate(now.getDate() - (6 - i));
-        const label = d.toLocaleDateString('en-PH', { weekday: 'short' });
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - (6 - i));         // i=6 → today, i=0 → 6 days ago
+
+        const dayNum  = d.getDate();
+        const month   = d.toLocaleDateString('en-PH', { month: 'short' });
+        const weekday = d.toLocaleDateString('en-PH', { weekday: 'short' });
+        // Show "Today" on the last bar so it's unmistakable
+        const isToday = i === 6;
+        const label   = isToday ? 'Today' : `${weekday} ${dayNum}`;
+
         const revenue = orders.reduce((sum, o) => {
           const od = o.createdAt?.toDate ? o.createdAt.toDate() : new Date(o.createdAt);
           const sameDay =
-            od.getDate() === d.getDate() &&
-            od.getMonth() === d.getMonth() &&
-            od.getFullYear() === d.getFullYear();
+            od.getFullYear() === d.getFullYear() &&
+            od.getMonth()    === d.getMonth()    &&
+            od.getDate()     === d.getDate();
           return sameDay && o.status === 'completed' ? sum + (o.grandTotal || 0) : sum;
         }, 0);
-        return { label, revenue, isLatest: i === 6 };
+
+        return { label, revenue, isLatest: isToday, fullDate: `${month} ${dayNum}` };
       });
+
     } else {
-      return Array.from({ length: 6 }, (_, i) => {
-        const weekStart = new Date(now);
-        weekStart.setDate(now.getDate() - now.getDay() - (5 - i) * 7);
+      // Calendar weeks of the CURRENT month: Week 1 … Week N
+      const year  = now.getFullYear();
+      const month = now.getMonth();
+
+      // Build each calendar week that overlaps with this month
+      const firstOfMonth = new Date(year, month, 1);
+      const lastOfMonth  = new Date(year, month + 1, 0); // last day of month
+
+      // Start from the Sunday on or before the 1st
+      const cursor = new Date(firstOfMonth);
+      cursor.setDate(cursor.getDate() - cursor.getDay()); // back to Sunday
+
+      const weeks = [];
+      let weekNum = 1;
+      while (cursor <= lastOfMonth) {
+        const weekStart = new Date(cursor);
         weekStart.setHours(0, 0, 0, 0);
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 6);
+        const weekEnd = new Date(cursor);
+        weekEnd.setDate(weekEnd.getDate() + 6);
         weekEnd.setHours(23, 59, 59, 999);
-        const label = weekStart.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' });
-        const revenue = orders.reduce((sum, o) => {
-          const od = o.createdAt?.toDate ? o.createdAt.toDate() : new Date(o.createdAt);
-          return od >= weekStart && od <= weekEnd && o.status === 'completed' ? sum + (o.grandTotal || 0) : sum;
-        }, 0);
-        return { label, revenue, isLatest: i === 5 };
-      });
+
+        // Only include if this week touches the current month
+        if (weekStart <= lastOfMonth && weekEnd >= firstOfMonth) {
+          const revenue = orders.reduce((sum, o) => {
+            const od = o.createdAt?.toDate ? o.createdAt.toDate() : new Date(o.createdAt);
+            return od >= weekStart && od <= weekEnd && o.status === 'completed'
+              ? sum + (o.grandTotal || 0) : sum;
+          }, 0);
+
+          // Is today in this week?
+          const isCurrentWeek = now >= weekStart && now <= weekEnd;
+
+          weeks.push({
+            label: `Wk ${weekNum}`,
+            sublabel: `${weekStart.getDate()}–${Math.min(weekEnd.getDate(), lastOfMonth.getDate())}`,
+            revenue,
+            isLatest: isCurrentWeek,
+          });
+          weekNum++;
+        }
+        cursor.setDate(cursor.getDate() + 7);
+      }
+      return weeks;
     }
   }, [orders, view]);
 
@@ -242,6 +301,9 @@ function RevenueChart({ orders }) {
   const prev = bars[bars.length - 2]?.revenue || 0;
   const trendUp = last >= prev;
   const trendPct = prev === 0 ? 100 : Math.abs(((last - prev) / prev) * 100).toFixed(1);
+
+  // Current month label for weekly sub-header
+  const monthLabel = new Date().toLocaleDateString('en-PH', { month: 'long', year: 'numeric' });
 
   return (
     <div>
@@ -257,56 +319,62 @@ function RevenueChart({ orders }) {
             </button>
           ))}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {view === 'weekly' && (
+            <span style={{ fontSize: 11, color: '#94A3B8', fontWeight: 500 }}>{monthLabel}</span>
+          )}
           <span style={{ fontSize: 11, fontWeight: 700, color: trendUp ? '#16A34A' : '#DC2626' }}>
             {trendUp ? '▲' : '▼'} {trendPct}%
           </span>
           <span style={{ fontSize: 11, color: '#94A3B8' }}>
-            vs previous {view === 'daily' ? 'day' : 'week'}
+            vs {view === 'daily' ? 'yesterday' : 'last week'}
           </span>
         </div>
       </div>
 
-      {/* Fixed-height chart area to prevent layout shift */}
-      <div style={{ height: CHART_H + 48, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: view === 'daily' ? 12 : 8, height: CHART_H }}>
+      <div style={{ height: CHART_H + 52, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: CHART_H }}>
           {bars.map((b, i) => {
             const barH = Math.max((b.revenue / maxRevenue) * CHART_H, 4);
             return (
-              <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%', gap: 0 }}>
+              <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
                 {b.revenue > 0 && (
                   <span style={{ fontSize: 9, color: '#5C4033', fontWeight: 700, whiteSpace: 'nowrap', marginBottom: 4 }}>
                     ₱{b.revenue >= 1000 ? `${(b.revenue / 1000).toFixed(1)}k` : b.revenue}
                   </span>
                 )}
                 <div
-                  title={`₱${b.revenue.toLocaleString()}`}
+                  title={`${b.fullDate || b.label} · ₱${b.revenue.toLocaleString()}`}
                   style={{
-                    width: '100%',
-                    height: barH,
+                    width: '100%', height: barH,
                     borderRadius: '6px 6px 0 0',
                     backgroundColor: b.isLatest ? '#5C4033' : '#D4B8A8',
                     transition: 'height 0.4s ease',
-                    cursor: 'default',
-                    flexShrink: 0,
+                    cursor: 'default', flexShrink: 0,
                   }}
                 />
               </div>
             );
           })}
         </div>
-        {/* Labels row — fixed height so it never shifts */}
-        <div style={{ display: 'flex', gap: view === 'daily' ? 12 : 8, paddingTop: 6 }}>
+
+        {/* Labels */}
+        <div style={{ display: 'flex', gap: 8, paddingTop: 6 }}>
           {bars.map((b, i) => (
             <div key={i} style={{ flex: 1, textAlign: 'center' }}>
-              <span style={{
-                fontSize: view === 'daily' ? 11 : 9,
+              <div style={{
+                fontSize: 10, fontWeight: b.isLatest ? 700 : 500,
                 color: b.isLatest ? '#5C4033' : '#94A3B8',
-                fontWeight: b.isLatest ? 700 : 500,
-                whiteSpace: 'nowrap',
+                whiteSpace: 'nowrap', lineHeight: 1.3,
               }}>
                 {b.label}
-              </span>
+              </div>
+              {/* Week range sub-label e.g. "1–7" */}
+              {b.sublabel && (
+                <div style={{ fontSize: 9, color: '#C4CEDB', lineHeight: 1.2 }}>
+                  {b.sublabel}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -355,7 +423,6 @@ function TopSellingProducts({ orders }) {
       {topProducts.map((p, i) => (
         <div key={p.name}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-            {/* Rank badge */}
             <div style={{
               width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
               backgroundColor: i === 0 ? '#F59E0B' : i === 1 ? '#94A3B8' : i === 2 ? '#CD7C2F' : '#E2E8F0',
@@ -364,7 +431,6 @@ function TopSellingProducts({ orders }) {
             }}>
               {i + 1}
             </div>
-            {/* Thumb */}
             <div style={styles.productThumb}>
               {p.image
                 ? <img src={p.image} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} onError={(e) => { e.target.style.display = 'none'; }} />
@@ -376,7 +442,6 @@ function TopSellingProducts({ orders }) {
             </div>
             <span style={{ fontSize: 12, fontWeight: 700, color: '#5C4033', flexShrink: 0 }}>{p.qty} sold</span>
           </div>
-          {/* Progress bar */}
           <div style={{ height: 4, backgroundColor: '#F1F5F9', borderRadius: 4, marginLeft: 32 }}>
             <div style={{
               height: '100%',
@@ -468,8 +533,6 @@ export default function Dashboard() {
 
       {/* ── Middle Row ────────────────────────────────────────── */}
       <div style={styles.midGrid}>
-
-        {/* Revenue Chart */}
         <div style={styles.card}>
           <div style={styles.cardHeader}>
             <div>
@@ -480,7 +543,6 @@ export default function Dashboard() {
           <RevenueChart orders={orders} />
         </div>
 
-        {/* This Week's Top Selling Products */}
         <div style={styles.card}>
           <div style={styles.cardHeader}>
             <div>
@@ -497,7 +559,6 @@ export default function Dashboard() {
         <div style={styles.cardHeader}>
           <div>
             <h3 style={styles.cardTitle}>Recent Orders</h3>
-            <p style={styles.cardSub}>{orders.length} total orders</p>
           </div>
         </div>
 
@@ -517,14 +578,15 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {orders.slice(0, 10).map((order) => {
+                {orders.slice(0, 5).map((order) => {
                   const date = order.createdAt?.toDate
-                  ? order.createdAt.toDate().toLocaleDateString('en-PH', {
-                      month: 'long',
-                      day: 'numeric',
-                      year: 'numeric'
-                    })
-                  : 'Not yet received';
+                    ? order.createdAt.toDate().toLocaleDateString('en-PH', {
+                        month: 'long', day: 'numeric', year: 'numeric',
+                      })
+                    : '—';
+                  const u = users.find((u) => u.id === order.userId || u.uid === order.userId || u.email === order.userEmail);
+                  const name = u?.displayName || u?.name || u?.fullName || u?.username || order.userEmail?.split('@')[0] || '—';
+
                   return (
                     <tr key={order.id} style={styles.tr}>
                       <td style={styles.td}>
@@ -533,22 +595,10 @@ export default function Dashboard() {
                         </span>
                       </td>
                       <td style={styles.td}>
-                        {(() => {
-                          const u = users.find((u) => u.id === order.userId || u.uid === order.userId || u.email === order.userEmail);
-                          const name = u?.displayName || u?.name || u?.fullName || u?.username || order.userEmail?.split('@')[0] || '—';
-                          return (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <div>
-                                <p style={{ fontSize: 13, fontWeight: 600, color: '#1A1A2E', margin: 0 }}>
-                                  {name}
-                                </p>
-                                <p style={{ fontSize: 11, color: '#94A3B8', margin: 0 }}>
-                                  {order.userEmail || ''}
-                                </p>
-                              </div>
-                            </div>
-                          );
-                        })()}
+                        <div>
+                          <p style={{ fontSize: 13, fontWeight: 600, color: '#1A1A2E', margin: 0 }}>{name}</p>
+                          <p style={{ fontSize: 11, color: '#94A3B8', margin: 0 }}>{order.userEmail || ''}</p>
+                        </div>
                       </td>
                       <td style={styles.td}>
                         <span style={{ fontSize: 13, color: '#374151', fontWeight: 600 }}>
@@ -567,10 +617,7 @@ export default function Dashboard() {
                         <StatusPill status={order.status} />
                       </td>
                       <td style={styles.td}>
-                        <button
-                          onClick={() => setSelectedOrder(order)}
-                          style={styles.viewBtn}
-                        >
+                        <button onClick={() => setSelectedOrder(order)} style={styles.viewBtn}>
                           View Order
                         </button>
                       </td>
@@ -584,7 +631,11 @@ export default function Dashboard() {
       </div>
 
       {/* ── Order Detail Modal ─────────────────────────────────── */}
-      <OrderModal order={selectedOrder} users={users} onClose={() => setSelectedOrder(null)} />
+      <OrderModal
+        order={selectedOrder}
+        users={users}
+        onClose={() => setSelectedOrder(null)}
+      />
     </div>
   );
 }
@@ -592,19 +643,6 @@ export default function Dashboard() {
 // ── Styles ───────────────────────────────────────────────────────
 const styles = {
   container: { display: 'flex', flexDirection: 'column', gap: 24, padding: '4px 0' },
-
-  // Page header
-  pageHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  pageTitle: { fontSize: 22, fontWeight: 800, color: '#1A1A2E', margin: 0 },
-  adminProfile: { display: 'flex', alignItems: 'center', gap: 10 },
-  adminAvatar: { width: 36, height: 36, borderRadius: '50%', objectFit: 'cover' },
-  adminAvatarFallback: {
-    width: 36, height: 36, borderRadius: '50%',
-    backgroundColor: '#5C4033', color: '#fff',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: 15, fontWeight: 700, flexShrink: 0,
-  },
-  adminName: { fontSize: 14, fontWeight: 600, color: '#374151' },
 
   statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 },
   statCard: { borderRadius: 16, padding: '20px 20px 16px', display: 'flex', flexDirection: 'column', gap: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' },
@@ -633,11 +671,10 @@ const styles = {
   viewBtn: {
     background: '#5C4033', border: 'none', borderRadius: 8,
     padding: '6px 14px', fontSize: 12, color: '#fff', fontWeight: 600,
-    cursor: 'pointer', whiteSpace: 'nowrap',
-    transition: 'opacity 0.15s',
+    cursor: 'pointer', whiteSpace: 'nowrap', transition: 'opacity 0.15s',
   },
 
-  // Modal
+  // Modal — identical to Orders.jsx
   modalOverlay: {
     position: 'fixed', inset: 0, zIndex: 1000,
     backgroundColor: 'rgba(0,0,0,0.45)',
@@ -660,15 +697,17 @@ const styles = {
   closeBtn: {
     background: '#F1F5F9', border: 'none', borderRadius: 8,
     width: 32, height: 32, cursor: 'pointer', fontSize: 13,
-    color: '#64748B', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    color: '#64748B', fontWeight: 700,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
     flexShrink: 0,
   },
+  // 2×2 grid — matches Orders.jsx exactly
   modalInfoRow: {
-    display: 'flex', gap: 50, flexWrap: 'wrap',
+    display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 24px',
     backgroundColor: '#F8FAFC', borderRadius: 12, padding: '14px 16px',
     marginBottom: 18,
   },
-  modalInfoItem: { display: 'flex', flexDirection: 'column', gap: 4 },
+  modalInfoItem: { display: 'flex', flexDirection: 'column', gap: 2 },
   modalInfoLabel: { fontSize: 10, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.5 },
   modalInfoValue: { fontSize: 13, fontWeight: 600, color: '#1A1A2E' },
   modalSection: { marginBottom: 18 },
@@ -678,7 +717,12 @@ const styles = {
     display: 'flex', alignItems: 'center', gap: 12,
     padding: '10px 0', borderBottom: '1px solid #F9FAFB',
   },
-  modalItemThumb: { width: 44, height: 44, borderRadius: 10, backgroundColor: '#FDF6F0', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 },
+  modalItemThumb: {
+    width: 44, height: 44, borderRadius: 10,
+    backgroundColor: '#FDF6F0',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden', flexShrink: 0,
+  },
   modalItemName: { fontSize: 13, fontWeight: 600, color: '#1A1A2E', margin: '0 0 2px' },
   modalItemVariant: { fontSize: 11, color: '#94A3B8', margin: 0 },
   modalItemPrice: { fontSize: 14, fontWeight: 700, color: '#5C4033', margin: '0 0 2px' },

@@ -3,30 +3,199 @@ import { db } from '../config/firebase';
 import {
   collection,
   onSnapshot,
-  updateDoc,
-  doc,
   query,
   orderBy,
 } from 'firebase/firestore';
 
-// ── Must match Dashboard.jsx statusConfig keys exactly ───────────
-const statusOptions = ['pending', 'confirmed', 'shipped', 'completed', 'cancelled'];
-
-const statusColors = {
-  pending:   { bg: '#FFF7ED', color: '#C2410C' },
-  confirmed: { bg: '#EFF6FF', color: '#1D4ED8' },
-  shipped:   { bg: '#F5F3FF', color: '#6D28D9' },
-  completed: { bg: '#F0FDF4', color: '#15803D' },
-  cancelled: { bg: '#FFF1F2', color: '#BE123C' },
+// ── Status config (matches Dashboard) ────────────────────────────
+const statusConfig = {
+  pending:   { bg: '#FFF7ED', color: '#C2410C', dot: '#F97316', label: 'Pending' },
+  confirmed: { bg: '#EFF6FF', color: '#1D4ED8', dot: '#3B82F6', label: 'Confirmed' },
+  shipped:   { bg: '#F5F3FF', color: '#6D28D9', dot: '#8B5CF6', label: 'Shipped' },
+  completed: { bg: '#F0FDF4', color: '#15803D', dot: '#22C55E', label: 'Completed' },
+  cancelled: { bg: '#FFF1F2', color: '#BE123C', dot: '#F43F5E', label: 'Cancelled' },
 };
 
-// Strip ₱ symbol and parse to number safely
+const statusOptions = ['pending', 'confirmed', 'shipped', 'completed', 'cancelled'];
+
+// ── Status Pill (same as Dashboard) ──────────────────────────────
+function StatusPill({ status }) {
+  const cfg = statusConfig[status] || {
+    bg: '#F1F5F9', color: '#64748B', dot: '#94A3B8', label: status,
+  };
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      backgroundColor: cfg.bg, color: cfg.color,
+      padding: '3px 10px', borderRadius: 100,
+      fontSize: 11, fontWeight: 700, textTransform: 'capitalize',
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: cfg.dot }} />
+      {cfg.label}
+    </span>
+  );
+}
+
+// ── Parse price safely ────────────────────────────────────────────
 const parsePrice = (val) => {
   if (val == null) return 0;
   if (typeof val === 'number') return val;
   return parseFloat(String(val).replace(/[₱,]/g, '')) || 0;
 };
 
+// ── Order Detail Modal ────────────────────────────────────────────
+function OrderModal({ order, onClose }) {
+  if (!order) return null;
+
+  const date = order.createdAt?.toDate
+    ? order.createdAt.toDate().toLocaleDateString('en-PH', {
+        month: 'long', day: 'numeric', year: 'numeric',
+      })
+    : '—';
+
+  const subtotal = order.items?.reduce((s, item) =>
+    s + parsePrice(item.price) * (parseInt(item.quantity, 10) || 1), 0) || 0;
+  const grandTotal = parsePrice(order.grandTotal);
+  const shipping = Math.max(grandTotal - subtotal, 0);
+
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={styles.modalHeader}>
+          <div>
+            <h2 style={styles.modalTitle}>Order Details</h2>
+            <p style={styles.modalOrderId}>
+              Order{' '}
+              <span style={{ fontFamily: 'monospace', color: '#5C4033' }}>
+                #{order.id}
+              </span>
+            </p>
+          </div>
+          <button onClick={onClose} style={styles.closeBtn}>✕</button>
+        </div>
+
+        {/* Info grid — 2×2 so all four items are always balanced */}
+        <div style={styles.modalInfoRow}>
+          <div style={styles.modalInfoItem}>
+            <span style={styles.modalInfoLabel}>Customer</span>
+            <p style={{ fontSize: 13, fontWeight: 600, margin: '2px 0 0', color: '#1A1A2E' }}>
+              {order.userEmail?.split('@')[0] || '—'}
+            </p>
+            <p style={{ fontSize: 11, color: '#94A3B8', margin: 0 }}>
+              {order.userEmail || ''}
+            </p>
+          </div>
+          <div style={styles.modalInfoItem}>
+            <span style={styles.modalInfoLabel}>Payment</span>
+            <span style={styles.modalInfoValue}>
+              {order.paymentMethod === 'cod' ? '💵 Cash on Delivery' : '📱 GCash'}
+            </span>
+          </div>
+          <div style={styles.modalInfoItem}>
+            <span style={styles.modalInfoLabel}>Date Placed</span>
+            <span style={styles.modalInfoValue}>{date}</span>
+          </div>
+          <div style={styles.modalInfoItem}>
+            <span style={styles.modalInfoLabel}>Date Received</span>
+            <span style={{ ...styles.modalInfoValue, color: '#15803D', fontWeight: 700 }}>
+              {order.completedAt?.toDate
+                ? order.completedAt.toDate().toLocaleDateString('en-PH', {
+                    month: 'long', day: 'numeric', year: 'numeric',
+                  })
+                : 'Not received yet'}
+            </span>
+          </div>
+        </div>
+
+        {/* Shipping address */}
+        {order.address && (
+          <div style={styles.modalSection}>
+            <p style={styles.modalSectionTitle}>📍 Shipping Address</p>
+            <p style={styles.modalAddressText}>
+              {[
+                order.address.street,
+                order.address.barangay,
+                order.address.city,
+                order.address.province,
+                order.address.zip,
+              ]
+                .filter(Boolean)
+                .join(', ')}
+            </p>
+          </div>
+        )}
+
+        {/* Items */}
+        <div style={styles.modalSection}>
+          <p style={styles.modalSectionTitle}>🛍️ Items Ordered</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {order.items?.map((item, i) => (
+              <div key={i} style={styles.modalItemRow}>
+                <div style={styles.modalItemThumb}>
+                  {item.image
+                    ? (
+                      <img
+                        src={item.image}
+                        alt={item.name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }}
+                        onError={(e) => { e.target.style.display = 'none'; }}
+                      />
+                    )
+                    : <span style={{ fontSize: 18 }}>🛍️</span>}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <p style={styles.modalItemName}>{item.name}</p>
+                  {item.variant && (
+                    <p style={styles.modalItemVariant}>Variant: {item.variant}</p>
+                  )}
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <p style={styles.modalItemPrice}>
+                    ₱{(parsePrice(item.price) * (parseInt(item.quantity, 10) || 1)).toLocaleString()}
+                  </p>
+                  <p style={styles.modalItemQty}>x{item.quantity || 1}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Totals */}
+        <div style={styles.modalTotals}>
+          <div style={styles.modalTotalRow}>
+            <span style={styles.modalTotalLabel}>Subtotal</span>
+            <span style={styles.modalTotalValue}>₱{subtotal.toLocaleString()}</span>
+          </div>
+          {shipping > 0 && (
+            <div style={styles.modalTotalRow}>
+              <span style={styles.modalTotalLabel}>Shipping</span>
+              <span style={styles.modalTotalValue}>₱{shipping.toLocaleString()}</span>
+            </div>
+          )}
+          <div style={{
+            ...styles.modalTotalRow,
+            borderTop: '2px solid #F1F5F9',
+            paddingTop: 10,
+            marginTop: 4,
+          }}>
+            <span style={{ ...styles.modalTotalLabel, fontSize: 15, fontWeight: 700, color: '#1A1A2E' }}>
+              Total
+            </span>
+            <span style={{ fontSize: 18, fontWeight: 800, color: '#5C4033' }}>
+              ₱{grandTotal.toLocaleString()}
+            </span>
+          </div>
+        </div>
+
+
+      </div>
+    </div>
+  );
+}
+
+// ── Main Orders Page ──────────────────────────────────────────────
 export default function Orders() {
   const [orders, setOrders]               = useState([]);
   const [loading, setLoading]             = useState(true);
@@ -34,7 +203,7 @@ export default function Orders() {
   const [filterStatus, setFilterStatus]   = useState('all');
   const [search, setSearch]               = useState('');
 
-  // ── Real-time listener ──────────────────────────────────────────
+  // Real-time listener
   useEffect(() => {
     const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(
@@ -55,22 +224,6 @@ export default function Orders() {
     return () => unsubscribe();
   }, []);
 
-  // ── Update status — saves completedAt when marked completed ─────
-  const handleUpdateStatus = async (orderId, newStatus) => {
-    try {
-      const updateData = { status: newStatus };
-
-      // Save timestamp when order is marked as completed
-      if (newStatus === 'completed') {
-        updateData.completedAt = new Date();
-      }
-
-      await updateDoc(doc(db, 'orders', orderId), updateData);
-    } catch (err) {
-      alert('Error updating status: ' + err.message);
-    }
-  };
-
   const filteredOrders = orders.filter((o) => {
     const matchesStatus = filterStatus === 'all' || o.status === filterStatus;
     const matchesSearch =
@@ -82,319 +235,298 @@ export default function Orders() {
   return (
     <div style={styles.container}>
 
-      {/* ── Page Header ──────────────────────────────────── */}
-      <div style={styles.pageHeader}>
-        <div>
-          <h1 style={styles.pageTitle}>Orders</h1>
-          <p style={styles.pageSubtitle}>{orders.length} total orders</p>
-        </div>
-      </div>
-
-      {/* ── Live indicator ─────────────────────────────── */}
-      <div style={styles.liveBar}>
-        <span style={styles.liveDot} />
-        <span style={styles.liveText}>
-          Real-time sync — new orders appear automatically
-        </span>
-      </div>
-
-      {/* ── Search & Filter ──────────────────────────────── */}
-      <div style={styles.filterRow}>
+      {/* ── Search + Export row ──────────────────────────────── */}
+      <div style={styles.searchRow}>
         <input
           style={styles.searchInput}
-          placeholder="🔍 Search by email or order ID..."
+          placeholder="🔍  Search by email or order ID..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <div style={styles.statusFilters}>
-          {['all', ...statusOptions].map((status) => (
+      </div>
+
+      {/* ── Status filter pills ──────────────────────────────── */}
+      <div style={styles.filterRow}>
+        {['all', ...statusOptions].map((status) => {
+          const isActive = filterStatus === status;
+          const cfg = statusConfig[status];
+          return (
             <button
               key={status}
               style={{
-                ...styles.statusBtn,
-                ...(filterStatus === status ? styles.statusBtnActive : {}),
+                ...styles.filterPill,
+                backgroundColor: isActive
+                  ? (cfg ? cfg.bg : '#1A1A2E')
+                  : '#F8FAFC',
+                color: isActive
+                  ? (cfg ? cfg.color : '#fff')
+                  : '#94A3B8',
+                border: isActive
+                  ? `1.5px solid ${cfg ? cfg.color : '#1A1A2E'}`
+                  : '1.5px solid #F1F5F9',
+                fontWeight: isActive ? 700 : 500,
               }}
               onClick={() => setFilterStatus(status)}
             >
+              {status === 'all' && <span style={{ marginRight: 4 }}>📋</span>}
+              {status !== 'all' && cfg && (
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  backgroundColor: cfg.dot, display: 'inline-block', marginRight: 5,
+                }} />
+              )}
               {status.charAt(0).toUpperCase() + status.slice(1)}
+              {/* Count badge */}
+              <span style={{
+                marginLeft: 6,
+                backgroundColor: isActive
+                  ? (cfg ? `${cfg.color}20` : 'rgba(255,255,255,0.2)')
+                  : '#F1F5F9',
+                color: isActive ? (cfg ? cfg.color : '#fff') : '#94A3B8',
+                fontSize: 10,
+                fontWeight: 700,
+                padding: '1px 6px',
+                borderRadius: 20,
+              }}>
+                {status === 'all'
+                  ? orders.length
+                  : orders.filter((o) => o.status === status).length}
+              </span>
             </button>
-          ))}
-        </div>
+          );
+        })}
       </div>
 
-      <div style={styles.mainContent}>
-
-        {/* ── Orders Table ─────────────────────────────── */}
-        <div style={styles.tableContainer}>
-          {loading ? (
-            <div style={styles.emptyState}>
-              <p>Connecting to live orders...</p>
-            </div>
-          ) : filteredOrders.length === 0 ? (
-            <div style={styles.emptyState}>
-              <span style={styles.emptyIcon}>📦</span>
-              <p style={styles.emptyText}>No orders found</p>
-            </div>
-          ) : (
+      {/* ── Table card ───────────────────────────────────────── */}
+      <div style={styles.card}>
+        {loading ? (
+          <div style={styles.emptyState}>
+            <div style={{ fontSize: 28 }}>⟳</div>
+            <p style={{ fontSize: 14, color: '#94A3B8', margin: 0 }}>
+              Connecting to live orders...
+            </p>
+          </div>
+        ) : filteredOrders.length === 0 ? (
+          <div style={styles.emptyState}>
+            <div style={{ fontSize: 36 }}>📦</div>
+            <p style={{ fontSize: 14, color: '#94A3B8', margin: '4px 0 0' }}>
+              No orders found
+            </p>
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
             <table style={styles.table}>
               <thead>
-                <tr style={styles.tableHeader}>
-                  <th style={styles.th}>Order ID</th>
-                  <th style={styles.th}>Customer</th>
-                  <th style={styles.th}>Items</th>
-                  <th style={styles.th}>Total</th>
-                  <th style={styles.th}>Payment</th>
-                  <th style={styles.th}>Status</th>
-                  <th style={styles.th}>Update</th>
+                <tr>
+                  {['Order ID', 'Customer', 'Items', 'Total', 'Date', 'Payment', 'Status', 'Action'].map((h) => (
+                    <th key={h} style={styles.th}>{h}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {filteredOrders.map((order) => (
-                  <tr
-                    key={order.id}
-                    style={{
-                      ...styles.tableRow,
-                      ...(selectedOrder?.id === order.id ? styles.tableRowSelected : {}),
-                    }}
-                    onClick={() => setSelectedOrder(order)}
-                  >
-                    <td style={styles.td}>
-                      <span style={styles.orderId}>#{order.id.slice(0, 8)}</span>
-                    </td>
-                    <td style={styles.td}>{order.userEmail}</td>
-                    <td style={styles.td}>{order.items?.length || 0} items</td>
-                    <td style={styles.td}>
-                      <span style={styles.price}>
-                        ₱{(order.grandTotal || 0).toLocaleString()}
-                      </span>
-                    </td>
-                    <td style={styles.td}>
-                      {order.paymentMethod === 'cod' ? '💵 COD' : '📱 GCash'}
-                    </td>
-                    <td style={styles.td}>
-                      <span style={{
-                        ...styles.statusBadge,
-                        backgroundColor: statusColors[order.status]?.bg || '#F5F5F5',
-                        color: statusColors[order.status]?.color || '#666',
-                      }}>
-                        {order.status}
-                      </span>
-                    </td>
-                    <td style={styles.td}>
-                      <select
-                        style={styles.statusSelect}
-                        value={order.status}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          handleUpdateStatus(order.id, e.target.value);
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {statusOptions.map((s) => (
-                          <option key={s} value={s}>
-                            {s.charAt(0).toUpperCase() + s.slice(1)}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  </tr>
-                ))}
+                {filteredOrders.map((order) => {
+                  const date = order.createdAt?.toDate
+                    ? order.createdAt.toDate().toLocaleDateString('en-PH', {
+                        month: 'long', day: 'numeric', year: 'numeric',
+                      })
+                    : '—';
+
+                  return (
+                    <tr key={order.id} style={styles.tr}>
+                      {/* Order ID */}
+                      <td style={styles.td}>
+                        <span style={{
+                          fontFamily: 'monospace', fontSize: 12,
+                          color: '#5C4033', fontWeight: 700,
+                        }}>
+                          #{order.id.slice(0, 8)}
+                        </span>
+                      </td>
+
+                      {/* Customer */}
+                      <td style={styles.td}>
+                        <div>
+                          <p style={{ fontSize: 13, fontWeight: 600, color: '#1A1A2E', margin: 0 }}>
+                            {order.userEmail?.split('@')[0] || '—'}
+                          </p>
+                          <p style={{ fontSize: 11, color: '#94A3B8', margin: 0 }}>
+                            {order.userEmail || ''}
+                          </p>
+                        </div>
+                      </td>
+
+                      {/* Items */}
+                      <td style={styles.td}>
+                        <span style={{ fontSize: 13, color: '#374151', fontWeight: 600 }}>
+                          {order.items?.length || 0} item{order.items?.length !== 1 ? 's' : ''}
+                        </span>
+                      </td>
+
+                      {/* Total */}
+                      <td style={styles.td}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: '#5C4033' }}>
+                          ₱{(order.grandTotal || 0).toLocaleString()}
+                        </span>
+                      </td>
+
+                      {/* Date */}
+                      <td style={styles.td}>
+                        <span style={{ fontSize: 12, color: '#94A3B8' }}>{date}</span>
+                      </td>
+
+                      {/* Payment */}
+                      <td style={styles.td}>
+                        <span style={{
+                          fontSize: 12, fontWeight: 600,
+                          color: order.paymentMethod === 'cod' ? '#C2410C' : '#1D4ED8',
+                        }}>
+                          {order.paymentMethod === 'cod' ? '💵 COD' : '📱 GCash'}
+                        </span>
+                      </td>
+
+                      {/* Status */}
+                      <td style={styles.td}>
+                        <StatusPill status={order.status} />
+                      </td>
+
+                      {/* Action */}
+                      <td style={styles.td}>
+                        <button
+                          style={styles.viewBtn}
+                          onClick={() => setSelectedOrder(order)}
+                        >
+                          View Order
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
-          )}
-        </div>
-
-        {/* ── Order Detail Panel ───────────────────────── */}
-        {selectedOrder && (
-          <div style={styles.detailPanel}>
-            <div style={styles.detailHeader}>
-              <h3 style={styles.detailTitle}>Order Details</h3>
-              <button style={styles.closeButton} onClick={() => setSelectedOrder(null)}>
-                ✕
-              </button>
-            </div>
-
-            <div style={styles.detailContent}>
-
-              <div style={styles.detailSection}>
-                <p style={styles.detailLabel}>Order ID</p>
-                <p style={styles.detailOrderId}>#{selectedOrder.id}</p>
-              </div>
-
-              <div style={styles.detailSection}>
-                <p style={styles.detailLabel}>Customer</p>
-                <p style={styles.detailValue}>{selectedOrder.userEmail}</p>
-              </div>
-
-              {/* Date Ordered */}
-              <div style={styles.detailSection}>
-                <p style={styles.detailLabel}>Date Ordered</p>
-                <p style={styles.detailValue}>
-                  {selectedOrder.createdAt?.toDate
-                    ? selectedOrder.createdAt.toDate().toLocaleDateString('en-PH', {
-                        month: 'long', day: 'numeric', year: 'numeric',
-                        hour: '2-digit', minute: '2-digit',
-                      })
-                    : '—'}
-                </p>
-              </div>
-
-              {/* Date Received — only shows when completed */}
-              {selectedOrder.status === 'completed' && (
-                <div style={styles.detailSection}>
-                  <p style={styles.detailLabel}>Date Received</p>
-                  <p style={{ ...styles.detailValue, color: '#15803D', fontWeight: 700 }}>
-                    {selectedOrder.completedAt?.toDate
-                      ? selectedOrder.completedAt.toDate().toLocaleDateString('en-PH', {
-                          month: 'long', day: 'numeric', year: 'numeric',
-                        })
-                      : '—'}
-                  </p>
-                </div>
-              )}
-
-              <div style={styles.detailSection}>
-                <p style={styles.detailLabel}>Payment Method</p>
-                <p style={styles.detailValue}>
-                  {selectedOrder.paymentMethod === 'cod' ? '💵 Cash on Delivery' : '📱 GCash'}
-                </p>
-              </div>
-
-              <div style={styles.detailSection}>
-                <p style={styles.detailLabel}>Status</p>
-                <span style={{
-                  ...styles.statusBadge,
-                  backgroundColor: statusColors[selectedOrder.status]?.bg || '#F5F5F5',
-                  color: statusColors[selectedOrder.status]?.color || '#666',
-                }}>
-                  {selectedOrder.status}
-                </span>
-              </div>
-
-              <div style={styles.detailSection}>
-                <p style={styles.detailLabel}>Items Ordered</p>
-                {selectedOrder.items?.map((item, index) => (
-                  <div key={index} style={styles.detailItem}>
-                    <div style={styles.detailItemImage}>
-                      {item.image
-                        ? <img src={item.image} alt={item.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} onError={(e) => { e.target.style.display = 'none'; }} />
-                        : <span>🛍️</span>}
-                    </div>
-                    <div style={styles.detailItemInfo}>
-                      <p style={styles.detailItemName}>{item.name}</p>
-                      <p style={styles.detailItemQty}>x{item.quantity}</p>
-                    </div>
-                    <p style={styles.detailItemPrice}>
-                      ₱{(parsePrice(item.price) * (item.quantity || 1)).toLocaleString()}
-                    </p>
-                  </div>
-                ))}
-              </div>
-
-              <div style={styles.detailSection}>
-                <div style={styles.priceRow}>
-                  <p style={styles.priceLabel}>Subtotal</p>
-                  <p style={styles.priceValue}>
-                    ₱{(selectedOrder.totalPrice || 0).toLocaleString()}
-                  </p>
-                </div>
-                <div style={styles.priceRow}>
-                  <p style={styles.priceLabel}>Shipping Fee</p>
-                  <p style={styles.priceValue}>₱{selectedOrder.shippingFee || 30}</p>
-                </div>
-                <div style={styles.priceDivider} />
-                <div style={styles.priceRow}>
-                  <p style={styles.priceTotalLabel}>Total</p>
-                  <p style={styles.priceTotalValue}>
-                    ₱{(selectedOrder.grandTotal || 0).toLocaleString()}
-                  </p>
-                </div>
-              </div>
-
-              <div style={styles.detailSection}>
-                <p style={styles.detailLabel}>Update Status</p>
-                <div style={styles.statusButtonsGrid}>
-                  {statusOptions.map((status) => (
-                    <button
-                      key={status}
-                      style={{
-                        ...styles.statusUpdateBtn,
-                        backgroundColor:
-                          selectedOrder.status === status
-                            ? statusColors[status]?.bg : '#F5F5F5',
-                        color:
-                          selectedOrder.status === status
-                            ? statusColors[status]?.color : '#666',
-                        border:
-                          selectedOrder.status === status
-                            ? `2px solid ${statusColors[status]?.color}`
-                            : '2px solid transparent',
-                      }}
-                      onClick={() => handleUpdateStatus(selectedOrder.id, status)}
-                    >
-                      {status.charAt(0).toUpperCase() + status.slice(1)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-            </div>
           </div>
         )}
       </div>
+
+      {/* ── Order Detail Modal ───────────────────────────────── */}
+      <OrderModal
+        order={selectedOrder}
+        onClose={() => setSelectedOrder(null)}
+      />
     </div>
   );
 }
 
+// ── Styles ────────────────────────────────────────────────────────
 const styles = {
-  container: { display: 'flex', flexDirection: 'column', gap: '24px' },
-  pageHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  pageTitle: { fontSize: '28px', fontWeight: 'bold', color: '#333', margin: 0 },
-  pageSubtitle: { fontSize: '14px', color: '#999', margin: 0 },
-  liveBar: { display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '10px', padding: '10px 16px' },
-  liveDot: { width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#22C55E', boxShadow: '0 0 0 3px rgba(34,197,94,0.2)', flexShrink: 0 },
-  liveText: { fontSize: '13px', color: '#15803D', fontWeight: '500' },
-  filterRow: { display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' },
-  searchInput: { flex: 1, padding: '12px 16px', borderRadius: '12px', border: '1px solid #E0E0E0', fontSize: '14px', outline: 'none', minWidth: '200px' },
-  statusFilters: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
-  statusBtn: { padding: '8px 16px', borderRadius: '20px', border: '1px solid #E0E0E0', backgroundColor: '#fff', fontSize: '13px', cursor: 'pointer', color: '#666' },
-  statusBtnActive: { backgroundColor: '#5C4033', color: '#fff', border: '1px solid #5C4033' },
-  mainContent: { display: 'flex', gap: '24px', alignItems: 'flex-start' },
-  tableContainer: { flex: 1, backgroundColor: '#fff', borderRadius: '16px', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', overflow: 'auto' },
-  emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '60px', gap: '12px' },
-  emptyIcon: { fontSize: '48px' },
-  emptyText: { fontSize: '16px', color: '#999', margin: 0 },
+  container: { display: 'flex', flexDirection: 'column', gap: 16 },
+
+  // Search row
+  searchRow: { display: 'flex', gap: 12, alignItems: 'center' },
+  searchInput: {
+    flex: 1, padding: '11px 16px',
+    borderRadius: 12, border: '1.5px solid #F1F5F9',
+    fontSize: 14, outline: 'none', color: '#374151',
+    backgroundColor: '#fff',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+  },
+
+
+  // Filter pills
+  filterRow: { display: 'flex', gap: 8, flexWrap: 'wrap' },
+  filterPill: {
+    display: 'inline-flex', alignItems: 'center',
+    padding: '6px 14px', borderRadius: 100,
+    fontSize: 12, cursor: 'pointer',
+    transition: 'all 0.15s',
+  },
+
+  // Table card
+  card: {
+    backgroundColor: '#fff', borderRadius: 16,
+    padding: 20, boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+    border: '1px solid #F1F5F9',
+  },
+  emptyState: {
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    justifyContent: 'center', padding: '60px 0', gap: 8,
+  },
+
+  // Table — matches Dashboard exactly
   table: { width: '100%', borderCollapse: 'collapse' },
-  tableHeader: { backgroundColor: '#F5F5F5' },
-  th: { padding: '12px 16px', textAlign: 'left', fontSize: '13px', fontWeight: '600', color: '#666' },
-  tableRow: { borderBottom: '1px solid #F5F5F5', cursor: 'pointer' },
-  tableRowSelected: { backgroundColor: '#FDF6F0' },
-  td: { padding: '14px 16px', fontSize: '14px', color: '#333' },
-  orderId: { fontFamily: 'monospace', backgroundColor: '#F5F5F5', padding: '4px 8px', borderRadius: '6px', fontSize: '12px' },
-  price: { fontWeight: 'bold', color: '#5C4033' },
-  statusBadge: { padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '600', textTransform: 'capitalize' },
-  statusSelect: { padding: '6px 10px', borderRadius: '8px', border: '1px solid #E0E0E0', fontSize: '13px', cursor: 'pointer', outline: 'none' },
-  detailPanel: { width: '320px', backgroundColor: '#fff', borderRadius: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', overflow: 'hidden', flexShrink: 0 },
-  detailHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 20px 0 20px' },
-  detailTitle: { fontSize: '16px', fontWeight: 'bold', color: '#333', margin: 0 },
-  closeButton: { backgroundColor: '#F5F5F5', border: 'none', borderRadius: '50%', width: '28px', height: '28px', cursor: 'pointer', fontSize: '12px' },
-  detailContent: { padding: '16px 20px 20px 20px', display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '70vh', overflowY: 'auto' },
-  detailSection: { borderBottom: '1px solid #F5F5F5', paddingBottom: '16px' },
-  detailLabel: { fontSize: '12px', color: '#999', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 6px 0' },
-  detailOrderId: { fontSize: '13px', fontFamily: 'monospace', color: '#333', margin: 0, wordBreak: 'break-all' },
-  detailValue: { fontSize: '14px', color: '#333', margin: 0 },
-  detailItem: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' },
-  detailItemImage: { width: '36px', height: '36px', borderRadius: '8px', backgroundColor: '#E8D5B7', display: 'flex', justifyContent: 'center', alignItems: 'center', fontSize: '18px', overflow: 'hidden', flexShrink: 0 },
-  detailItemInfo: { flex: 1 },
-  detailItemName: { fontSize: '13px', fontWeight: '600', color: '#333', margin: 0 },
-  detailItemQty: { fontSize: '12px', color: '#999', margin: 0 },
-  detailItemPrice: { fontSize: '13px', fontWeight: 'bold', color: '#5C4033', margin: 0 },
-  priceRow: { display: 'flex', justifyContent: 'space-between', marginBottom: '6px' },
-  priceLabel: { fontSize: '13px', color: '#999', margin: 0 },
-  priceValue: { fontSize: '13px', color: '#333', fontWeight: '600', margin: 0 },
-  priceDivider: { height: '1px', backgroundColor: '#F0E8E0', margin: '8px 0' },
-  priceTotalLabel: { fontSize: '15px', fontWeight: 'bold', color: '#333', margin: 0 },
-  priceTotalValue: { fontSize: '15px', fontWeight: 'bold', color: '#5C4033', margin: 0 },
-  statusButtonsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '8px' },
-  statusUpdateBtn: { padding: '8px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', textTransform: 'capitalize' },
+  th: {
+    textAlign: 'left', fontSize: 11, fontWeight: 700,
+    color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.6,
+    padding: '0 12px 12px', borderBottom: '1px solid #F1F5F9',
+  },
+  tr: { borderBottom: '1px solid #F9FAFB' },
+  td: { padding: 12, verticalAlign: 'middle' },
+  viewBtn: {
+    background: '#5C4033', border: 'none', borderRadius: 8,
+    padding: '6px 14px', fontSize: 12, color: '#fff', fontWeight: 600,
+    cursor: 'pointer', whiteSpace: 'nowrap',
+    transition: 'opacity 0.15s',
+  },
+
+  // Modal — matches Dashboard exactly
+  modalOverlay: {
+    position: 'fixed', inset: 0, zIndex: 1000,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: 20,
+  },
+  modalBox: {
+    backgroundColor: '#fff', borderRadius: 20,
+    width: '100%', maxWidth: 560,
+    maxHeight: '90vh', overflowY: 'auto',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+    padding: 28,
+  },
+  modalHeader: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+    marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid #F1F5F9',
+  },
+  modalTitle: { fontSize: 18, fontWeight: 800, color: '#1A1A2E', margin: '0 0 4px' },
+  modalOrderId: { fontSize: 12, color: '#94A3B8', margin: 0 },
+  closeBtn: {
+    background: '#F1F5F9', border: 'none', borderRadius: 8,
+    width: 32, height: 32, cursor: 'pointer', fontSize: 13,
+    color: '#64748B', fontWeight: 700,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0,
+  },
+  modalInfoRow: {
+    display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 24px',
+    backgroundColor: '#F8FAFC', borderRadius: 12, padding: '14px 16px',
+    marginBottom: 18,
+  },
+  modalInfoItem: { display: 'flex', flexDirection: 'column', gap: 2 },
+  modalInfoLabel: {
+    fontSize: 10, fontWeight: 700, color: '#94A3B8',
+    textTransform: 'uppercase', letterSpacing: 0.5,
+  },
+  modalInfoValue: { fontSize: 13, fontWeight: 600, color: '#1A1A2E' },
+  modalSection: { marginBottom: 18 },
+  modalSectionTitle: { fontSize: 13, fontWeight: 700, color: '#374151', margin: '0 0 10px' },
+  modalAddressText: { fontSize: 13, color: '#64748B', margin: 0, lineHeight: 1.5 },
+  modalItemRow: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: '10px 0', borderBottom: '1px solid #F9FAFB',
+  },
+  modalItemThumb: {
+    width: 44, height: 44, borderRadius: 10,
+    backgroundColor: '#FDF6F0',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden', flexShrink: 0,
+  },
+  modalItemName: { fontSize: 13, fontWeight: 600, color: '#1A1A2E', margin: '0 0 2px' },
+  modalItemVariant: { fontSize: 11, color: '#94A3B8', margin: 0 },
+  modalItemPrice: { fontSize: 14, fontWeight: 700, color: '#5C4033', margin: '0 0 2px' },
+  modalItemQty: { fontSize: 11, color: '#94A3B8', margin: 0 },
+  modalTotals: { borderTop: '1px solid #F1F5F9', paddingTop: 16, marginTop: 4 },
+  modalTotalRow: {
+    display: 'flex', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 8,
+  },
+  modalTotalLabel: { fontSize: 13, color: '#64748B' },
+  modalTotalValue: { fontSize: 13, fontWeight: 600, color: '#374151' },
 };
